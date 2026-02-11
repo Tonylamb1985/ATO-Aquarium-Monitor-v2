@@ -1,0 +1,528 @@
+# ============================================================================
+# ATO MEGA SYSTEM - COMPLETE CONFIGURATION
+# ============================================================================
+# 
+# Add these sections to your existing Home Assistant configuration.yaml
+# 
+# This includes ALL upgrades:
+# - Base ATO sensors
+# - 3-sensor temperature monitoring  
+# - Smart refill button
+# - Complete maintenance tracking
+# - Hive HVAC integration
+# - Room environment monitoring
+#
+# IMPORTANT: Update these entity names to match YOUR system:
+# - climate.hive_heating → YOUR Hive entity
+# - sensor.average_house_temperature → YOUR sensor
+# - sensor.hallway_humidity → YOUR sensor
+# - mobile_app_YOUR_PHONE → YOUR device
+# ============================================================================
+
+# ============================================================================
+# MQTT CONFIGURATION (If not already configured)
+# ============================================================================
+mqtt:
+  broker: YOUR_MQTT_BROKER_IP
+  username: YOUR_USERNAME
+  password: YOUR_PASSWORD
+
+# ============================================================================
+# SMART REFILL BUTTON
+# ============================================================================
+  button:
+    - name: "ATO Smart Refill"
+      command_topic: "aquarium/ato/smart_refill"
+      payload_press: "1"
+      icon: mdi:water-check
+      device_class: restart
+
+# ============================================================================
+# INPUT HELPERS - Maintenance Tracking
+# ============================================================================
+input_datetime:
+  # Last maintenance dates
+  aquarium_last_water_change:
+    name: "Last Water Change"
+    has_date: true
+    has_time: false
+  
+  aquarium_last_filter_clean:
+    name: "Last Filter Clean"
+    has_date: true
+    has_time: false
+  
+  # Next maintenance dates
+  aquarium_next_water_change:
+    name: "Next Water Change"
+    has_date: true
+    has_time: false
+  
+  aquarium_next_filter_clean:
+    name: "Next Filter Clean"
+    has_date: true
+    has_time: false
+
+input_number:
+  # Maintenance intervals (days)
+  aquarium_water_change_interval:
+    name: "Water Change Interval"
+    min: 1
+    max: 30
+    step: 1
+    initial: 7
+    unit_of_measurement: "days"
+    icon: mdi:calendar
+  
+  aquarium_filter_clean_interval:
+    name: "Filter Clean Interval"
+    min: 1
+    max: 90
+    step: 1
+    initial: 14
+    unit_of_measurement: "days"
+    icon: mdi:calendar
+  
+  # Supply inventory
+  aquarium_salt_stock:
+    name: "Salt Mix Stock"
+    min: 0
+    max: 50
+    step: 0.5
+    initial: 10
+    unit_of_measurement: "kg"
+    icon: mdi:package-variant
+  
+  aquarium_food_stock:
+    name: "Fish Food Stock"
+    min: 0
+    max: 500
+    step: 1
+    initial: 100
+    unit_of_measurement: "g"
+    icon: mdi:food-fish
+  
+  # Usage amounts
+  aquarium_salt_per_change:
+    name: "Salt Per Water Change"
+    min: 0.1
+    max: 5
+    step: 0.1
+    initial: 1.2
+    unit_of_measurement: "kg"
+  
+  aquarium_food_per_day:
+    name: "Food Per Day"
+    min: 1
+    max: 50
+    step: 1
+    initial: 3
+    unit_of_measurement: "g"
+
+# ============================================================================
+# TEMPLATE SENSORS - All Upgrades Integrated
+# ============================================================================
+template:
+  - sensor:
+      # ======================================================================
+      # MAINTENANCE COUNTDOWN SENSORS
+      # ======================================================================
+      
+      - name: "Water Change Due In"
+        unit_of_measurement: "days"
+        state: >
+          {% set next_date = states('input_datetime.aquarium_next_water_change') %}
+          {% if next_date not in ['unknown', 'unavailable', ''] %}
+            {% set next = as_timestamp(next_date) %}
+            {% set now = now().timestamp() %}
+            {{ ((next - now) / 86400) | round(0) }}
+          {% else %}
+            7
+          {% endif %}
+        icon: >
+          {% set days = states('sensor.water_change_due_in') | int(7) %}
+          {% if days < 0 %}mdi:alert-circle
+          {% elif days <= 1 %}mdi:clock-alert
+          {% else %}mdi:calendar-check
+          {% endif %}
+        attributes:
+          status: >
+            {% set days = states('sensor.water_change_due_in') | int(7) %}
+            {% if days < 0 %}Overdue by {{ days|abs }} days
+            {% elif days == 0 %}Due today!
+            {% elif days == 1 %}Due tomorrow
+            {% else %}Due in {{ days }} days
+            {% endif %}
+      
+      - name: "Filter Cleaning Due In"
+        unit_of_measurement: "days"
+        state: >
+          {% set next_date = states('input_datetime.aquarium_next_filter_clean') %}
+          {% if next_date not in ['unknown', 'unavailable', ''] %}
+            {% set next = as_timestamp(next_date) %}
+            {% set now = now().timestamp() %}
+            {{ ((next - now) / 86400) | round(0) }}
+          {% else %}
+            14
+          {% endif %}
+        icon: >
+          {% set days = states('sensor.filter_cleaning_due_in') | int(14) %}
+          {% if days < 0 %}mdi:alert-circle
+          {% elif days <= 1 %}mdi:clock-alert
+          {% else %}mdi:air-filter
+          {% endif %}
+      
+      # ======================================================================
+      # INVENTORY SENSORS
+      # ======================================================================
+      
+      - name: "Salt Changes Remaining"
+        unit_of_measurement: "changes"
+        state: >
+          {% set stock = states('input_number.aquarium_salt_stock') | float(0) %}
+          {% set per_change = states('input_number.aquarium_salt_per_change') | float(1) %}
+          {% if per_change > 0 %}
+            {{ (stock / per_change) | round(0) }}
+          {% else %}
+            0
+          {% endif %}
+        icon: mdi:water-sync
+      
+      - name: "Food Days Remaining"
+        unit_of_measurement: "days"
+        state: >
+          {% set stock = states('input_number.aquarium_food_stock') | float(0) %}
+          {% set per_day = states('input_number.aquarium_food_per_day') | float(3) %}
+          {% if per_day > 0 %}
+            {{ (stock / per_day) | round(0) }}
+          {% else %}
+            0
+          {% endif %}
+        icon: mdi:food-fish
+      
+      # ======================================================================
+      # COST SENSORS
+      # ======================================================================
+      
+      - name: "Water Change Cost"
+        unit_of_measurement: "$"
+        state: >
+          {% set salt_kg = states('input_number.aquarium_salt_per_change') | float(1.2) %}
+          {% set salt_cost_per_kg = 15 %}
+          {{ (salt_kg * salt_cost_per_kg) | round(2) }}
+        icon: mdi:cash
+      
+      - name: "Estimated Monthly Costs"
+        unit_of_measurement: "$"
+        state: >
+          {% set wc_interval = states('input_number.aquarium_water_change_interval') | float(7) %}
+          {% set wc_cost = states('sensor.water_change_cost') | float(18) %}
+          {% set wc_per_month = 30 / wc_interval if wc_interval > 0 else 0 %}
+          {{ (wc_per_month * wc_cost) | round(2) }}
+        icon: mdi:cash-multiple
+      
+      # ======================================================================
+      # HIVE HVAC INTEGRATION SENSORS
+      # ======================================================================
+      
+      - name: "Hive Heating Impact Factor"
+        state: >
+          {% set heating = is_state('climate.hive_heating', 'heat') %}
+          {% set target = state_attr('climate.hive_heating', 'temperature') | float(20) %}
+          {% set current = states('sensor.average_house_temperature') | float(20) %}
+          {% set diff = target - current %}
+          {% if heating and diff > 2 %}high
+          {% elif heating and diff > 1 %}moderate
+          {% elif heating %}low
+          {% else %}none
+          {% endif %}
+        icon: >
+          {% set impact = states('sensor.hive_heating_impact_factor') %}
+          {% if impact == 'high' %}mdi:fire
+          {% elif impact == 'moderate' %}mdi:radiator
+          {% elif impact == 'low' %}mdi:radiator-disabled
+          {% else %}mdi:radiator-off
+          {% endif %}
+        attributes:
+          heating_on: >
+            {{ is_state('climate.hive_heating', 'heat') }}
+          predicted_impact: >
+            {% set impact = states('sensor.hive_heating_impact_factor') %}
+            {% if impact == 'high' %}+25-35% evaporation
+            {% elif impact == 'moderate' %}+10-15% evaporation
+            {% elif impact == 'low' %}+5-10% evaporation
+            {% else %}Normal
+            {% endif %}
+      
+      - name: "Tank House Temperature Efficiency"
+        unit_of_measurement: "%"
+        state: >
+          {% set house = states('sensor.average_house_temperature') | float(20) %}
+          {% set tank = states('sensor.ato_tank_temperature') | float(25) %}
+          {% set ideal_house = 22 %}
+          {% set house_diff = (ideal_house - house) | abs %}
+          {% set efficiency = 100 - (house_diff * 10) %}
+          {{ [efficiency, 0] | max | round(0) }}
+        icon: mdi:gauge
+        attributes:
+          status: >
+            {% set eff = states('sensor.tank_house_temperature_efficiency') | int(100) %}
+            {% if eff >= 90 %}Excellent
+            {% elif eff >= 75 %}Good
+            {% elif eff >= 60 %}Fair
+            {% else %}Poor
+            {% endif %}
+      
+      - name: "Predicted Evaporation Today"
+        unit_of_measurement: "L"
+        state: >
+          {% set base_rate = states('sensor.ato_rate_24_hours') | float(0.15) %}
+          {% set heating = is_state('climate.hive_heating', 'heat') %}
+          {% set humidity = states('sensor.hallway_humidity') | float(50) %}
+          {% set heating_factor = 1.15 if heating else 1.0 %}
+          {% set humidity_factor = 1 + ((50 - humidity) * 0.015) %}
+          {{ (base_rate * heating_factor * humidity_factor * 24) | round(2) }}
+        icon: mdi:water-alert
+      
+      # ======================================================================
+      # ROOM CORRELATION SENSORS
+      # ======================================================================
+      
+      - name: "Room Tank Temperature Difference"
+        unit_of_measurement: "°C"
+        state: >
+          {% set room = states('sensor.average_house_temperature') | float(20) %}
+          {% set tank = states('sensor.ato_tank_temperature') | float(25) %}
+          {{ (tank - room) | round(1) }}
+        icon: mdi:thermometer-lines
+      
+      - name: "Evaporation Humidity Factor"
+        unit_of_measurement: "ratio"
+        state: >
+          {% set humidity = states('sensor.hallway_humidity') | float(50) %}
+          {% set evap = states('sensor.ato_rate_24_hours') | float(0.1) %}
+          {% if humidity > 0 %}
+            {{ ((100 - humidity) * evap * 100) | round(2) }}
+          {% else %}
+            0
+          {% endif %}
+        icon: mdi:water-percent
+      
+      - name: "Heater Efficiency Factor"
+        unit_of_measurement: "%"
+        state: >
+          {% set room = states('sensor.average_house_temperature') | float(20) %}
+          {% set target = 25 %}
+          {% set diff = target - room %}
+          {% if diff <= 0 %}100
+          {% else %}{{ (100 - (diff * 10)) | round(0) }}
+          {% endif %}
+        icon: mdi:radiator
+      
+      - name: "Tank Heater Cost Estimate"
+        unit_of_measurement: "$/month"
+        state: >
+          {% set house = states('sensor.average_house_temperature') | float(20) %}
+          {% set tank = states('sensor.ato_tank_temperature') | float(25) %}
+          {% set diff = tank - house %}
+          {% set base_cost = 12 %}
+          {% set factor = 1 + (diff * 0.15) %}
+          {{ (base_cost * factor) | round(2) }}
+        icon: mdi:cash
+
+  - binary_sensor:
+      - name: "High Evaporation Due to Heating"
+        state: >
+          {% set heating = is_state('climate.hive_heating', 'heat') %}
+          {% set evap = states('sensor.ato_rate_24_hours') | float(0) %}
+          {{ heating and evap > 0.25 }}
+        icon: >
+          {{ 'mdi:fire-alert' if is_state('binary_sensor.high_evaporation_due_to_heating', 'on') else 'mdi:check-circle' }}
+
+# ============================================================================
+# SCRIPTS - Maintenance Actions
+# ============================================================================
+script:
+  record_water_change:
+    alias: "Record Water Change"
+    sequence:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.aquarium_last_water_change
+        data:
+          date: "{{ now().date() }}"
+      
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.aquarium_next_water_change
+        data:
+          date: >
+            {{ (now() + timedelta(days=states('input_number.aquarium_water_change_interval')|int(7))).date() }}
+      
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.aquarium_salt_stock
+        data:
+          value: >
+            {{ [states('input_number.aquarium_salt_stock')|float(0) - states('input_number.aquarium_salt_per_change')|float(1.2), 0]|max }}
+      
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "✅ Water Change Recorded"
+          message: >
+            Next change: {{ (now() + timedelta(days=states('input_number.aquarium_water_change_interval')|int(7))).strftime('%B %d') }}
+            Salt remaining: {{ states('sensor.salt_changes_remaining') }} changes
+  
+  record_filter_clean:
+    alias: "Record Filter Clean"
+    sequence:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.aquarium_last_filter_clean
+        data:
+          date: "{{ now().date() }}"
+      
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.aquarium_next_filter_clean
+        data:
+          date: >
+            {{ (now() + timedelta(days=states('input_number.aquarium_filter_clean_interval')|int(14))).date() }}
+      
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "✅ Filter Clean Recorded"
+          message: >
+            Next clean: {{ (now() + timedelta(days=states('input_number.aquarium_filter_clean_interval')|int(14))).strftime('%B %d') }}
+
+# ============================================================================
+# AUTOMATIONS - All Integrated
+# ============================================================================
+automation:
+  # ==========================================================================
+  # MAINTENANCE REMINDERS
+  # ==========================================================================
+  
+  - alias: "ATO - Water Change Due Tomorrow"
+    id: ato_water_change_tomorrow
+    trigger:
+      - platform: time
+        at: "19:00:00"
+    condition:
+      - condition: template
+        value_template: "{{ states('sensor.water_change_due_in') | int(7) == 1 }}"
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🐠 Water Change Due Tomorrow"
+          message: >
+            Water change scheduled for tomorrow
+            Salt remaining: {{ states('sensor.salt_changes_remaining') }} changes
+            {% if states('sensor.salt_changes_remaining')|int(0) < 2 %}
+            ⚠️ Low salt stock!
+            {% endif %}
+  
+  - alias: "ATO - Water Change Overdue"
+    id: ato_water_change_overdue
+    trigger:
+      - platform: time
+        at: "09:00:00"
+    condition:
+      - condition: numeric_state
+        entity_id: sensor.water_change_due_in
+        below: 0
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🚨 Water Change OVERDUE"
+          message: >
+            Water change is {{ states('sensor.water_change_due_in')|int(0)|abs }} days overdue!
+            Please complete as soon as possible.
+  
+  - alias: "ATO - Low Salt Stock Alert"
+    id: ato_low_salt
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.salt_changes_remaining
+        below: 3
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "📦 Low Salt Stock"
+          message: >
+            Only {{ states('sensor.salt_changes_remaining') }} water changes of salt remaining
+            Order more salt soon!
+  
+  # ==========================================================================
+  # HIVE HVAC AUTOMATIONS
+  # ==========================================================================
+  
+  - alias: "ATO - Hive Heating High Evaporation Alert"
+    id: ato_hive_high_evap
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.high_evaporation_due_to_heating
+        to: "on"
+        for:
+          minutes: 30
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🔥 Hive Heating Affecting Tank"
+          message: >
+            Evaporation increased to {{ states('sensor.ato_rate_24_hours') }}L/h
+            Hive target: {{ state_attr('climate.hive_heating', 'temperature') }}°C
+            House: {{ states('sensor.average_house_temperature') }}°C
+            Predicted today: {{ states('sensor.predicted_evaporation_today') }}L
+  
+  - alias: "ATO - Low Winter Efficiency Alert"
+    id: ato_winter_efficiency
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.tank_house_temperature_efficiency
+        below: 60
+        for:
+          hours: 6
+    condition:
+      - condition: state
+        entity_id: sensor.ato_current_season
+        state: "Winter"
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "❄️ Winter Tank Efficiency Low"
+          message: >
+            Efficiency: {{ states('sensor.tank_house_temperature_efficiency') }}%
+            House: {{ states('sensor.average_house_temperature') }}°C
+            Tank: {{ states('sensor.ato_tank_temperature') }}°C
+            
+            💡 Raise Hive by 2-3°C to improve efficiency
+            Potential savings: $8-12/month
+  
+  # ==========================================================================
+  # ROOM ENVIRONMENT AUTOMATIONS
+  # ==========================================================================
+  
+  - alias: "ATO - High Evaporation Low Humidity Alert"
+    id: ato_low_humidity_evap
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.ato_rate_24_hours
+        above: 0.3
+    condition:
+      - condition: numeric_state
+        entity_id: sensor.hallway_humidity
+        below: 40
+    action:
+      - service: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "💨 High Evaporation - Low Humidity"
+          message: >
+            Evaporation: {{ states('sensor.ato_rate_24_hours') }}L/h
+            Room humidity: {{ states('sensor.hallway_humidity') }}%
+            
+            💡 Consider running a humidifier
+
+# ============================================================================
+# END OF CONFIGURATION
+# ============================================================================
