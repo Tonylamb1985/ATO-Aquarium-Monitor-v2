@@ -4,6 +4,16 @@
 # All sensors for water testing, fish, plants, equipment
 # Auto-loaded via packages in configuration.yaml
 
+input_select:
+  water_test_type:
+    name: "Water Test Type"
+    options:
+      - "Seachem Ammonia Badge"
+      - "API 5-in-1 Strip"
+      - "NT Labs Tubes"
+    initial: "Seachem Ammonia Badge"
+    icon: mdi:test-tube
+
 mqtt:
   sensor:
     # === WATER TESTING ===
@@ -128,6 +138,14 @@ mqtt:
       icon: mdi:food
       json_attributes_topic: "aquarium/feeding/latest"
     
+    # === MONTHLY COST ===
+    - name: "Monthly Cost"
+      state_topic: "aquarium/analytics/costs"
+      value_template: "{{ value_json.total | default(0) }}"
+      unit_of_measurement: "$"
+      icon: mdi:currency-usd
+      json_attributes_topic: "aquarium/analytics/costs"
+
     # === OVERALL STATUS ===
     - name: "Tank Overall Score"
       state_topic: "aquarium/status/overall"

@@ -140,7 +140,7 @@ mqtt:
     
     - name: "ATO Temp 24h Max"
       state_topic: "aquarium/ato/temp_stats"
-      value_template: "{{ value_json.max_7d }}"
+      value_template: "{{ value_json.max_24h }}"
       unit_of_measurement: "°C"
       device_class: temperature
       icon: mdi:thermometer-high
@@ -256,11 +256,17 @@ mqtt:
       command_topic: "aquarium/ato/refill"
       payload_press: "23"
       icon: mdi:water-plus
-    
+
     - name: "ATO Reset Daily Counters"
       command_topic: "aquarium/ato/reset"
       payload_press: "1"
       icon: mdi:restart
+
+    - name: "ATO Smart Refill"
+      command_topic: "aquarium/ato/smart_refill"
+      payload_press: "1"
+      icon: mdi:water-check
+      device_class: restart
 
 # Automations
 automation:
@@ -350,17 +356,5 @@ automation:
 # Note: Replace 'mobile_app_YOUR_PHONE' with your actual mobile app notify service
 # Find it in: Developer Tools → Services → Filter for 'notify.mobile_app'
 
-# ============================================================================
-# SMART REFILL BUTTON (Added for v2.0)
-# ============================================================================
-
-mqtt:
-  button:
-    - name: "ATO Smart Refill"
-      command_topic: "aquarium/ato/smart_refill"
-      payload_press: "1"
-      icon: mdi:water-check
-      device_class: restart
-
-# NOTE: The smart refill button only works when calibration confidence ≥ 80%
-# The Python script will validate confidence before executing
+# NOTE: The smart refill button (above in mqtt: button:) only works when
+# calibration confidence >= 80%. The Python script validates before executing.

@@ -61,11 +61,6 @@ class AquariumAnalyzer:
         logger.info("="*50)
         return True
     
-    def on_connect(self, client, userdata, flags, rc):
-        logger.info(f"MQTT Connected (rc={rc})")
-        client.subscribe("aquarium/analyze/#")
-        logger.info("Subscribed to aquarium/analyze/#")
-    
     def on_message(self, client, userdata, msg):
         """Route messages to appropriate analyzer"""
         try:
@@ -139,6 +134,10 @@ class AquariumAnalyzer:
         results['processor'] = 'HD530_GPU' if self.gpu_enabled else 'CPU'
         
         self.publish_water_test_results(results)
+        # Cache confidence for overall score
+        confidences = [d['confidence'] for d in results.values() if isinstance(d, dict) and 'confidence' in d]
+        self._last_water_confidence = round(np.mean(confidences)) if confidences else 90
+        self.publish_overall_status()
         logger.info(f"Water test complete: {source} in {processing_time:.2f}s")
     
     def analyze_ammonia_badge(self, img):
@@ -281,7 +280,9 @@ class AquariumAnalyzer:
         
         self.mqtt_client.publish("aquarium/fish/health", json.dumps(results), retain=True)
         self.mqtt_client.publish("aquarium/fish/activity", json.dumps({'activity_level': 85}), retain=True)
-        
+        self._last_fish_health = results['overall_health']
+        self.publish_overall_status()
+
         logger.info(f"Fish health analysis complete in {(datetime.now() - start_time).total_seconds():.2f}s")
     
     # ===== PLANT GROWTH =====
@@ -312,7 +313,9 @@ class AquariumAnalyzer:
         self.mqtt_client.publish("aquarium/plants/coverage", json.dumps(results), retain=True)
         self.mqtt_client.publish("aquarium/plants/algae", json.dumps(algae), retain=True)
         self.mqtt_client.publish("aquarium/plants/health", json.dumps({'health_score': 88}), retain=True)
-        
+        self._last_plant_health = 88
+        self.publish_overall_status()
+
         logger.info(f"Plant analysis complete in {(datetime.now() - start_time).total_seconds():.2f}s")
     
     # ===== CLEANLINESS =====
@@ -332,6 +335,8 @@ class AquariumAnalyzer:
         }
         
         self.mqtt_client.publish("aquarium/cleanliness/score", json.dumps(results), retain=True)
+        self._last_cleanliness = results['overall_score']
+        self.publish_overall_status()
         logger.info(f"Cleanliness analysis complete in {(datetime.now() - start_time).total_seconds():.2f}s")
     
     # ===== EQUIPMENT =====
@@ -347,7 +352,9 @@ class AquariumAnalyzer:
         self.mqtt_client.publish("aquarium/equipment/heater", json.dumps(heater), retain=True)
         self.mqtt_client.publish("aquarium/equipment/filter", json.dumps(filter_perf), retain=True)
         self.mqtt_client.publish("aquarium/equipment/light", json.dumps(light), retain=True)
-        
+        self._last_equipment_avg = round((heater['efficiency'] + filter_perf['percent_rated'] + light['output_percent']) / 3)
+        self.publish_overall_status()
+
         logger.info(f"Equipment analysis complete in {(datetime.now() - start_time).total_seconds():.2f}s")
     
     # ===== FEEDING =====
@@ -368,6 +375,46 @@ class AquariumAnalyzer:
         self.mqtt_client.publish("aquarium/feeding/latest", json.dumps(results), retain=True)
         logger.info(f"Feeding analysis complete in {(datetime.now() - start_time).total_seconds():.2f}s")
     
+    # ===== OVERALL STATUS =====
+
+    def publish_overall_status(self):
+        """Compute and publish overall tank score from latest analysis results"""
+        # Collect latest scores from retained MQTT messages stored locally
+        scores = {
+            'water_quality': getattr(self, '_last_water_confidence', 90),
+            'fish_health': getattr(self, '_last_fish_health', 95),
+            'plant_growth': getattr(self, '_last_plant_health', 88),
+            'equipment': getattr(self, '_last_equipment_avg', 90),
+            'maintenance': getattr(self, '_last_cleanliness', 87),
+        }
+
+        total = round(sum(scores.values()) / len(scores), 1)
+        scores['total_score'] = total
+        scores['timestamp'] = datetime.now().isoformat()
+
+        self.mqtt_client.publish("aquarium/status/overall", json.dumps(scores), retain=True)
+        logger.info(f"Overall tank score: {total}")
+
+    def publish_monthly_costs(self):
+        """Publish monthly cost estimates"""
+        costs = {
+            'total': 47,
+            'test_strips': 8,
+            'food': 15,
+            'fertilizer': 6,
+            'electricity': 18,
+            'timestamp': datetime.now().isoformat()
+        }
+        self.mqtt_client.publish("aquarium/analytics/costs", json.dumps(costs), retain=True)
+
+    def on_connect(self, client, userdata, flags, rc):
+        logger.info(f"MQTT Connected (rc={rc})")
+        client.subscribe("aquarium/analyze/#")
+        logger.info("Subscribed to aquarium/analyze/#")
+        # Publish initial overall status and costs on connect
+        self.publish_overall_status()
+        self.publish_monthly_costs()
+
     def run(self):
         """Start the analyzer"""
         logger.info("="*50)
